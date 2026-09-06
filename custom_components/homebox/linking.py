@@ -102,20 +102,6 @@ def get_ha_device_url(hass: HomeAssistant, ha_device_id: str) -> str:
     return f"{base_url.rstrip('/')}/config/devices/device/{ha_device_id}"
 
 
-def _has_backlink_in_fields(fields: list[dict[str, Any]] | None) -> bool:
-    """Return True if any field looks like the managed HA backlink field."""
-    if not fields:
-        return False
-
-    for field in fields:
-        if (
-            field.get("name") == LINK_BACKLINK_FIELD_NAME
-            and isinstance(field.get("textValue"), str)
-        ):
-            return True
-    return False
-
-
 def _pop_bidirectional_link(
     ha_device_to_hb_item: dict[str, str],
     hb_item_to_ha_device: dict[str, str],
@@ -169,9 +155,12 @@ async def scan_tagged_items_for_links(
     """Scan HomeBox tagged items and classify unlinked/conflicting records.
 
     For linked items still carrying the tag: restores a missing backlink field.
+    For items already carrying a backlink to an existing HA device but missing
+    from the local link map: adopts the link (self-heal).
     For linked items whose tag was removed: removes the link from HA.
     """
     ha_device_to_hb_item, hb_item_to_ha_device = get_link_maps(config_entry)
+    device_registry = dr.async_get(hass)
 
     tag_id = await api.async_ensure_link_tag()
     tagged_items = await api.async_get_hb_items_by_tag(tag_id)
@@ -183,13 +172,26 @@ async def scan_tagged_items_for_links(
     for tagged_item in tagged_items:
         hb_item_id = tagged_item.item_id
         tagged_item_ids.add(hb_item_id)
+
+        # The /v1/entities list response no longer includes custom fields, so
+        # fetch the item detail to read the Home Assistant backlink.
+        try:
+            full_hb_item = await api.async_get_hb_item(hb_item_id)
+        except (HomeBoxApiError, HomeBoxAuthenticationError, HomeBoxConnectionError):
+            _LOGGER.warning(
+                "Unable to fetch HomeBox item %s during link scan; keeping current state",
+                hb_item_id,
+            )
+            continue
+        backlink_url = _extract_backlink_url(full_hb_item)
+
         mapped_ha_device_id = hb_item_to_ha_device.get(hb_item_id)
         if mapped_ha_device_id:
             if ha_device_to_hb_item.get(mapped_ha_device_id) != hb_item_id:
                 conflicts.append(
                     f"Inconsistent map for hb_item={hb_item_id} and ha_device={mapped_ha_device_id}"
                 )
-            elif not _has_backlink_in_fields(tagged_item.fields):
+            elif not backlink_url:
                 # Linked in HA but backlink was manually removed in HomeBox — restore it.
                 ha_device_url = get_ha_device_url(hass, mapped_ha_device_id)
                 try:
@@ -207,15 +209,38 @@ async def scan_tagged_items_for_links(
                     )
             continue
 
-        has_backlink = _has_backlink_in_fields(tagged_item.fields)
-        if not has_backlink:
-            unlinked_hb_items.append(
-                HomeBoxTaggedItem(
-                    hb_item_id=hb_item_id,
-                    name=tagged_item.name,
-                    has_backlink=False,
-                )
+        # Not tracked in the local link map. If HomeBox already stores a backlink
+        # to an existing HA device, adopt that link so the item is not offered
+        # again for linking/import.
+        linked_ha_device_id = (
+            _extract_ha_device_id_from_url(backlink_url) if backlink_url else None
+        )
+        if (
+            linked_ha_device_id is not None
+            and linked_ha_device_id not in ha_device_to_hb_item
+            and device_registry.async_get(linked_ha_device_id) is not None
+        ):
+            ha_device_to_hb_item[linked_ha_device_id] = hb_item_id
+            hb_item_to_ha_device[hb_item_id] = linked_ha_device_id
+            maps_changed = True
+            _LOGGER.debug(
+                "Adopted existing HomeBox backlink for hb_item=%s ha_device=%s",
+                hb_item_id,
+                linked_ha_device_id,
             )
+            continue
+
+        if backlink_url:
+            # Already linked in HomeBox (stale or to another device); do not offer it.
+            continue
+
+        unlinked_hb_items.append(
+            HomeBoxTaggedItem(
+                hb_item_id=hb_item_id,
+                name=tagged_item.name,
+                has_backlink=False,
+            )
+        )
 
     # Linked items whose HomeAssistant tag was removed → remove the link from HA.
     for hb_item_id, ha_device_id in list(hb_item_to_ha_device.items()):

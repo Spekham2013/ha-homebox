@@ -81,6 +81,7 @@
                 "menu_options": {
                     "create_hb_item_from_ha_device": "Create and link HomeBox item from Home Assistant device",
                     "bulk_create_hb_items_from_area": "Bulk create HomeBox items from area",
+                    "bulk_create_hb_items_all_devices": "Bulk create HomeBox items from all devices",
                     "unlink_ha_device": "Unlink Home Assistant device and HomeBox item",
                     "resync": "Refresh tagged HomeBox items and clean up links"
                 }
@@ -89,6 +90,13 @@
                 "title": "Select Home Assistant area",
                 "data": {
                     "area": "Area"
+                }
+            },
+            "bulk_create_hb_items_all_devices": {
+                "title": "Select devices",
+                "description": "Select from all unlinked Home Assistant devices ({device_count}). Devices already linked to a HomeBox item are not shown.",
+                "data": {
+                    "ha_device_ids": "Home Assistant devices to add"
                 }
             },
             "bulk_create_select_devices": {

@@ -81,6 +81,7 @@
                 "menu_options": {
                     "create_hb_item_from_ha_device": "HomeBox-Element aus Home Assistant-Gerät erstellen und verknüpfen",
                     "bulk_create_hb_items_from_area": "HomeBox-Elemente aus Bereich gesammelt erstellen",
+                    "bulk_create_hb_items_all_devices": "HomeBox-Elemente aus allen Geräten gesammelt erstellen",
                     "unlink_ha_device": "Verknüpfung zwischen Home Assistant-Gerät und HomeBox-Element aufheben",
                     "resync": "Getaggte HomeBox-Elemente aktualisieren und Verknüpfungen bereinigen"
                 }
@@ -89,6 +90,13 @@
                 "title": "Home Assistant-Bereich auswählen",
                 "data": {
                     "area": "Bereich"
+                }
+            },
+            "bulk_create_hb_items_all_devices": {
+                "title": "Geräte auswählen",
+                "description": "Aus allen nicht verknüpften Home Assistant-Geräten auswählen ({device_count}). Bereits mit einem HomeBox-Element verknüpfte Geräte werden nicht angezeigt.",
+                "data": {
+                    "ha_device_ids": "Hinzuzufügende Home Assistant-Geräte"
                 }
             },
             "bulk_create_select_devices": {

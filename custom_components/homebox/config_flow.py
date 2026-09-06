@@ -430,9 +430,67 @@ class HomeBoxOptionsFlow(OptionsFlowWithConfigEntry):
             menu_options=[
                 "create_hb_item_from_ha_device",
                 "bulk_create_hb_items_from_area",
+                "bulk_create_hb_items_all_devices",
                 "unlink_ha_device",
                 "resync",
             ],
+        )
+
+    async def async_step_bulk_create_hb_items_all_devices(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Select devices across all areas for bulk HomeBox item creation."""
+        available_devices = _get_unlinked_named_ha_devices(self.hass, self.config_entry)
+        if not available_devices:
+            return self.async_abort(reason="no_unlinked_ha_devices")
+
+        selectable_options = [
+            selector.SelectOptionDict(
+                value=device.id,
+                label=_ha_device_label_with_area(self.hass, device),
+            )
+            for device in sorted(
+                available_devices,
+                key=lambda device: (
+                    (device.name_by_user or device.name or device.id).lower(),
+                    device.id,
+                ),
+            )
+        ]
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            selected_ids = user_input.get(CONF_HA_DEVICE_IDS, [])
+            if not isinstance(selected_ids, list):
+                selected_ids = []
+            selectable_ids = {device.id for device in available_devices}
+            selected_set = set(selected_ids)
+            if not selected_set:
+                errors["base"] = "no_devices_selected"
+            elif not selected_set.issubset(selectable_ids):
+                errors["base"] = "link_conflict"
+            else:
+                self._bulk_pending_ha_device_ids = selected_ids
+                self._bulk_total_ha_device_count = len(selected_ids)
+                return await self.async_step_bulk_create_hb_item_details()
+
+        return self.async_show_form(
+            step_id="bulk_create_hb_items_all_devices",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_HA_DEVICE_IDS, default=[]): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=selectable_options,
+                            multiple=True,
+                            mode=selector.SelectSelectorMode.LIST,
+                        )
+                    )
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "device_count": str(len(available_devices)),
+            },
         )
 
     async def async_step_bulk_create_hb_items_from_area(
@@ -1040,6 +1098,15 @@ def _ha_device_candidate_label(device: dr.DeviceEntry) -> str:
     if not details:
         return base_name
     return f"{base_name} • {' • '.join(details)}"
+
+
+def _ha_device_label_with_area(hass: HomeAssistant, device: dr.DeviceEntry) -> str:
+    """Build a device label that also shows its Home Assistant area."""
+    label = _ha_device_candidate_label(device)
+    area_name = _get_ha_device_area_name(hass, device)
+    if area_name:
+        return f"{label} — {area_name}"
+    return label
 
 
 def _safe_str(value: Any) -> str | None:
