@@ -538,17 +538,22 @@ class HomeBoxOptionsFlow(OptionsFlowWithConfigEntry):
             return self.async_abort(reason="missing_hb_item")
 
         device_registry = dr.async_get(self.hass)
-        # Named, non-HomeBox devices in this area, excluding anything already
-        # owned by this HomeBox entry (linked devices and any stray "HomeBox"
-        # devices HomeBox previously materialized).
-        selectable_devices = _get_named_ha_devices_in_area(
-            self.hass, selected_area_id, self.config_entry.entry_id
-        )
-
         ha_device_to_hb_item, _ = get_link_maps(self.config_entry)
         linked_ids = set(ha_device_to_hb_item)
-        # Already-linked devices are derived from the link map (they are filtered
-        # out of the selectable pool above) so they can still be shown for info.
+
+        # Named, non-HomeBox devices in this area, excluding anything already in
+        # the link map as well as devices this HomeBox entry owns (its hub and
+        # any stray "HomeBox" devices HomeBox previously materialized).
+        selectable_devices = [
+            device
+            for device in _get_named_ha_devices_in_area(
+                self.hass, selected_area_id, self.config_entry.entry_id
+            )
+            if device.id not in linked_ids
+        ]
+
+        # Already-linked devices are derived from the link map so they can still
+        # be shown for reference even though they are excluded above.
         linked_devices = [
             device
             for ha_device_id in linked_ids

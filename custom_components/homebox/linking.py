@@ -154,10 +154,13 @@ async def scan_tagged_items_for_links(
 ) -> HomeBoxLinkScanResult:
     """Scan HomeBox tagged items and classify unlinked/conflicting records.
 
-    For linked items still carrying the tag: restores a missing backlink field.
     For items already carrying a backlink to an existing HA device but missing
     from the local link map: adopts the link (self-heal).
     For linked items whose tag was removed: removes the link from HA.
+
+    Only items that are not already tracked in the local link map are fetched in
+    detail (to read their backlink); already-linked items are trusted from the
+    map to keep the daily refresh cheap.
     """
     ha_device_to_hb_item, hb_item_to_ha_device = get_link_maps(config_entry)
     device_registry = dr.async_get(hass)
@@ -173,45 +176,29 @@ async def scan_tagged_items_for_links(
         hb_item_id = tagged_item.item_id
         tagged_item_ids.add(hb_item_id)
 
-        # The /v1/entities list response no longer includes custom fields, so
-        # fetch the item detail to read the Home Assistant backlink.
-        try:
-            full_hb_item = await api.async_get_hb_item(hb_item_id)
-        except (HomeBoxApiError, HomeBoxAuthenticationError, HomeBoxConnectionError):
-            _LOGGER.warning(
-                "Unable to fetch HomeBox item %s during link scan; keeping current state",
-                hb_item_id,
-            )
-            continue
-        backlink_url = _extract_backlink_url(full_hb_item)
-
         mapped_ha_device_id = hb_item_to_ha_device.get(hb_item_id)
         if mapped_ha_device_id:
             if ha_device_to_hb_item.get(mapped_ha_device_id) != hb_item_id:
                 conflicts.append(
                     f"Inconsistent map for hb_item={hb_item_id} and ha_device={mapped_ha_device_id}"
                 )
-            elif not backlink_url:
-                # Linked in HA but backlink was manually removed in HomeBox — restore it.
-                ha_device_url = get_ha_device_url(hass, mapped_ha_device_id)
-                try:
-                    await api.async_set_hb_item_backlink(hb_item_id, ha_device_url)
-                    _LOGGER.debug(
-                        "Restored missing backlink for hb_item=%s ha_device=%s",
-                        hb_item_id,
-                        mapped_ha_device_id,
-                    )
-                except (HomeBoxApiError, HomeBoxAuthenticationError, HomeBoxConnectionError):
-                    _LOGGER.warning(
-                        "Unable to restore backlink for hb_item=%s linked to ha_device=%s",
-                        hb_item_id,
-                        mapped_ha_device_id,
-                    )
+            # Linked and consistent: trust the map without a per-item detail call.
             continue
 
-        # Not tracked in the local link map. If HomeBox already stores a backlink
-        # to an existing HA device, adopt that link so the item is not offered
-        # again for linking/import.
+        # Not tracked in the local link map. The /v1/entities list response no
+        # longer includes custom fields, so fetch the detail to read the backlink.
+        try:
+            full_hb_item = await api.async_get_hb_item(hb_item_id)
+        except (HomeBoxApiError, HomeBoxAuthenticationError, HomeBoxConnectionError):
+            _LOGGER.warning(
+                "Unable to fetch HomeBox item %s during link scan; skipping it",
+                hb_item_id,
+            )
+            continue
+        backlink_url = _extract_backlink_url(full_hb_item)
+
+        # If HomeBox already stores a backlink to an existing HA device, adopt
+        # that link so the item is not offered again for linking/import.
         linked_ha_device_id = (
             _extract_ha_device_id_from_url(backlink_url) if backlink_url else None
         )

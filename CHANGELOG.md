@@ -5,14 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.3] - 2026-09-07
+## [0.5.4] - 2026-09-07
 
 ### Fixed
 
 - Fixed the bulk import / linking wizard showing devices that were already linked to a HomeBox item. The new `/v1/entities` list responses no longer include an item's custom `fields`, so the link scanner could no longer see the Home Assistant backlink and treated already-linked items as unlinked. The scanner now reads the backlink from each item's detail and self-heals the local link map by adopting existing HomeBox backlinks that point to a known Home Assistant device.
 - Fixed purchase and sold dates being wiped on item updates: the entities API renamed `purchaseTime`/`soldTime` to `purchaseDate`/`soldDate`, which were not carried over in the update payload.
-- Fixed linked diagnostic sensors (`HomeBox ID`, battery depletion) occasionally attaching to a nameless device that displays as "HomeBox" instead of the real device. Their `DeviceInfo` now also carries the linked device's name/manufacturer/model so it stays correct even when the sensor is registered before the device's owning integration recreates it (e.g. after re-adding the integration and relying on backlink matching).
-- Fixed the bulk import wizard listing HomeBox-owned devices (already-linked devices and stray "HomeBox" devices) as selectable link targets. Device eligibility now excludes anything the HomeBox config entry is attached to, not just devices carrying a HomeBox identifier. Already-linked devices shown for reference are now derived from the link map.
+- Fixed linked diagnostic sensors (`HomeBox ID`, battery depletion) creating a duplicate "twin" device instead of attaching to the real one. They previously supplied `DeviceInfo` with the linked device's identifiers copied in; when the owning integration's device was momentarily absent at setup (observed with Matter/Thread devices reporting unavailable), Home Assistant materialized a second device carrying the same identifier. These sensors now bind to the existing device by its device id and never create a device, and existing sensors migrate onto the real device on reload.
+- Fixed the bulk import wizard listing already-linked and HomeBox-owned devices as selectable link targets. The selectable list again excludes everything in the link map, and additionally excludes devices the HomeBox config entry owns (its hub and any stray duplicate devices). Already-linked devices shown for reference are derived from the link map.
+- Made the daily refresh resilient: the link scan only fetches item details for items not already tracked locally, and a scan/forecast failure no longer prevents the integration from loading (only a core statistics failure does), reducing intermittent "HomeBox integration is not loaded" errors.
 
 ### Added
 

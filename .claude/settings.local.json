@@ -5,7 +5,12 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:developers.home-assistant.io)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:www.hacs.xyz)"
+      "WebFetch(domain:www.hacs.xyz)",
+      "mcp__home-assistant__ha_eval_template",
+      "mcp__home-assistant__ha_get_integration",
+      "mcp__home-assistant__ha_get_device",
+      "mcp__home-assistant__ha_search",
+      "Bash(python3 -m py_compile custom_components/homebox/sensor.py custom_components/homebox/config_flow.py custom_components/homebox/coordinator.py custom_components/homebox/linking.py)"
     ]
   }
 }

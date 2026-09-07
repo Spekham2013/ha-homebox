@@ -200,27 +200,25 @@ class HomeBoxStatisticsSensor(
         self.async_write_ha_state()
 
 
-def _build_linked_device_info(linked_ha_device: dr.DeviceEntry) -> DeviceInfo:
-    """Build DeviceInfo that attaches an entity to an existing HA device.
+def _async_attach_entity_to_device(
+    hass: HomeAssistant, entity_id: str, ha_device_id: str
+) -> None:
+    """Attach an already-registered entity to an existing device by its id.
 
-    Identifiers/connections are copied so Home Assistant merges the entity into
-    the device that its owning integration created. The name/manufacturer/model
-    are included as a fallback so that if this entity is registered before the
-    owning integration has (re)created the device, the resulting device is not
-    left nameless (which otherwise displays as the integration name, "HomeBox").
+    Binding by device id — instead of supplying ``DeviceInfo`` with copied
+    identifiers/connections — avoids ever materializing a duplicate device
+    entry. Copying identifiers can create a second device with the same
+    identifier if the owning integration's device is momentarily absent when
+    this entity is set up (observed with Matter/Thread devices that report
+    unavailable), leaving a stray "HomeBox" device behind.
     """
-    device_info: DeviceInfo = DeviceInfo()
-    if linked_ha_device.identifiers:
-        device_info["identifiers"] = set(linked_ha_device.identifiers)
-    if linked_ha_device.connections:
-        device_info["connections"] = set(linked_ha_device.connections)
-    if name := (linked_ha_device.name or linked_ha_device.name_by_user):
-        device_info["name"] = name
-    if linked_ha_device.manufacturer:
-        device_info["manufacturer"] = linked_ha_device.manufacturer
-    if linked_ha_device.model:
-        device_info["model"] = linked_ha_device.model
-    return device_info
+    device_registry = dr.async_get(hass)
+    if device_registry.async_get(ha_device_id) is None:
+        return
+    entity_registry = er.async_get(hass)
+    entity_entry = entity_registry.async_get(entity_id)
+    if entity_entry is not None and entity_entry.device_id != ha_device_id:
+        entity_registry.async_update_entity(entity_id, device_id=ha_device_id)
 
 
 class HomeBoxLinkedItemIdSensor(
@@ -247,7 +245,11 @@ class HomeBoxLinkedItemIdSensor(
         self._hb_item_id = hb_item_id
         self._attr_unique_id = f"{config_entry_id}_{ha_device_id}_hb_item_id"
         self._attr_native_value = hb_item_id
-        self._attr_device_info = _build_linked_device_info(linked_ha_device)
+
+    async def async_added_to_hass(self) -> None:
+        """Bind this diagnostic entity onto the linked device."""
+        await super().async_added_to_hass()
+        _async_attach_entity_to_device(self.hass, self.entity_id, self._ha_device_id)
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
@@ -281,7 +283,11 @@ class HomeBoxLinkedBatteryDepletionDateSensor(
         self._ha_device_id = ha_device_id
         self._attr_unique_id = f"{config_entry_id}_{ha_device_id}_battery_depletion_date"
         self._attr_native_value = self._resolve_native_value()
-        self._attr_device_info = _build_linked_device_info(linked_ha_device)
+
+    async def async_added_to_hass(self) -> None:
+        """Bind this diagnostic entity onto the linked device."""
+        await super().async_added_to_hass()
+        _async_attach_entity_to_device(self.hass, self.entity_id, self._ha_device_id)
 
     def _resolve_native_value(self) -> date | None:
         """Return depletion date for linked device if available."""

@@ -91,8 +91,21 @@ class HomeBoxDataUpdateCoordinator(DataUpdateCoordinator[HomeBoxStatistics]):
     async def _async_fetch_statistics_and_links(self) -> HomeBoxStatistics:
         """Fetch statistics plus link scan data with shared logic."""
         await self._async_sync_ha_areas()
+        # Core call that gates whether the entry can load. A failure here is a
+        # genuine "cannot reach HomeBox" and should surface as UpdateFailed.
         group_stats: HomeBoxGroupStatistics = await self.api.async_get_group_statistics()
-        link_scan = await scan_tagged_items_for_links(self.hass, self.api, self.config_entry)
+
+        # Link scan is enrichment: a transient failure must not prevent the
+        # integration from loading, so degrade to the previous link state.
+        try:
+            link_scan = await scan_tagged_items_for_links(
+                self.hass, self.api, self.config_entry
+            )
+        except (HomeBoxApiError, HomeBoxAuthenticationError, HomeBoxConnectionError) as err:
+            _LOGGER.warning(
+                "HomeBox link scan failed; keeping previous link state (%s)", err
+            )
+            link_scan = HomeBoxLinkScanResult(unlinked_hb_items=[], conflicts=[])
         if link_scan.updated_options is not None:
             self.hass.config_entries.async_update_entry(
                 self.config_entry, options=link_scan.updated_options
@@ -100,9 +113,15 @@ class HomeBoxDataUpdateCoordinator(DataUpdateCoordinator[HomeBoxStatistics]):
         maintenance_due_today, maintenance_due_next_week = (
             await self._async_count_maintenance_due()
         )
-        battery_forecasts = await async_collect_linked_battery_forecasts(
-            self.hass, self.config_entry
-        )
+        try:
+            battery_forecasts = await async_collect_linked_battery_forecasts(
+                self.hass, self.config_entry
+            )
+        except Exception:  # noqa: BLE001 - enrichment must not fail entry setup
+            _LOGGER.exception(
+                "Unable to collect linked battery forecasts; continuing without them"
+            )
+            battery_forecasts = {}
         try:
             new_options = await async_sync_battery_maintenance_items(
                 self.hass, self.config_entry, self.api, battery_forecasts
