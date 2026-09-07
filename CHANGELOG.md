@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-09-07
+
+### Added
+
+- HomeBox devices can now be deleted from the device page. The integration implements `async_remove_config_entry_device`, so Home Assistant enables the "Delete" button for HomeBox-owned devices — useful for removing stray/duplicate devices left behind when a linked device is deleted while still linked. The removal is Home Assistant-side only: if the device was tracked in the link map, its mapping is dropped so it is not recreated on the next reload, but the HomeBox item and its backlink are left untouched (deleting a possibly-stray HA device never modifies HomeBox).
+
 ## [0.5.6] - 2026-09-07
 
 ### Fixed

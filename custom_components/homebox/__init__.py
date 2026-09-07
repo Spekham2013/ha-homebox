@@ -27,6 +27,8 @@ from .linking import (
     async_cleanup_removed_ha_device_link,
     async_sync_all_linked_hb_item_locations,
     async_sync_linked_hb_item_location,
+    build_updated_options,
+    get_link_maps,
 )
 from .services import async_setup_services, async_unload_services
 
@@ -154,3 +156,33 @@ async def async_unload_entry(hass: HomeAssistant, entry: HomeBoxConfigEntry) -> 
 async def async_reload_entry(hass: HomeAssistant, entry: HomeBoxConfigEntry) -> None:
     """Reload entry after options update."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: HomeBoxConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Allow removing a HomeBox device from the device page.
+
+    Home Assistant only enables the device "Delete" button for an integration
+    that implements this hook. This performs Home Assistant-side cleanup only:
+    if the device was tracked in the link map, its mapping is dropped so the
+    device is not recreated on the next reload. The HomeBox item and its
+    backlink are intentionally left untouched — deleting an HA device (which
+    may be a stray/duplicate) must never modify HomeBox.
+    """
+    ha_device_to_hb_item, hb_item_to_ha_device = get_link_maps(config_entry)
+    hb_item_id = ha_device_to_hb_item.get(device_entry.id)
+    if hb_item_id is None:
+        # Hub device or a stray/duplicate HomeBox device: nothing mapped.
+        return True
+
+    ha_device_to_hb_item.pop(device_entry.id, None)
+    if hb_item_to_ha_device.get(hb_item_id) == device_entry.id:
+        hb_item_to_ha_device.pop(hb_item_id, None)
+    new_options = build_updated_options(
+        config_entry, ha_device_to_hb_item, hb_item_to_ha_device
+    )
+    hass.config_entries.async_update_entry(config_entry, options=new_options)
+    return True
