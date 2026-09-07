@@ -154,8 +154,11 @@ async def scan_tagged_items_for_links(
 ) -> HomeBoxLinkScanResult:
     """Scan HomeBox tagged items and classify unlinked/conflicting records.
 
-    For items already carrying a backlink to an existing HA device but missing
-    from the local link map: adopts the link (self-heal).
+    Tagged items that are not tracked in the local link map are offered for
+    linking (surfaced as discovery flows). Items still carrying a HomeBox
+    backlink are held back until that backlink is cleared (via unlink or the
+    "Refresh tagged" cleanup), which keeps already-linked items from being
+    re-offered without silently re-adopting them.
     For linked items whose tag was removed: removes the link from HA.
 
     Only items that are not already tracked in the local link map are fetched in
@@ -163,7 +166,6 @@ async def scan_tagged_items_for_links(
     map to keep the daily refresh cheap.
     """
     ha_device_to_hb_item, hb_item_to_ha_device = get_link_maps(config_entry)
-    device_registry = dr.async_get(hass)
 
     tag_id = await api.async_ensure_link_tag()
     tagged_items = await api.async_get_hb_items_by_tag(tag_id)
@@ -195,30 +197,11 @@ async def scan_tagged_items_for_links(
                 hb_item_id,
             )
             continue
-        backlink_url = _extract_backlink_url(full_hb_item)
 
-        # If HomeBox already stores a backlink to an existing HA device, adopt
-        # that link so the item is not offered again for linking/import.
-        linked_ha_device_id = (
-            _extract_ha_device_id_from_url(backlink_url) if backlink_url else None
-        )
-        if (
-            linked_ha_device_id is not None
-            and linked_ha_device_id not in ha_device_to_hb_item
-            and device_registry.async_get(linked_ha_device_id) is not None
-        ):
-            ha_device_to_hb_item[linked_ha_device_id] = hb_item_id
-            hb_item_to_ha_device[hb_item_id] = linked_ha_device_id
-            maps_changed = True
-            _LOGGER.debug(
-                "Adopted existing HomeBox backlink for hb_item=%s ha_device=%s",
-                hb_item_id,
-                linked_ha_device_id,
-            )
-            continue
-
-        if backlink_url:
-            # Already linked in HomeBox (stale or to another device); do not offer it.
+        if _extract_backlink_url(full_hb_item):
+            # Still carries a HomeBox backlink but is not in the local map. Hold
+            # it back rather than re-offering; the "Refresh tagged" cleanup clears
+            # such stale backlinks, after which it is offered on the next scan.
             continue
 
         unlinked_hb_items.append(
