@@ -499,7 +499,9 @@ class HomeBoxOptionsFlow(OptionsFlowWithConfigEntry):
         """Select Home Assistant area for bulk HomeBox item creation."""
         area_registry = ar.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
-        available_areas = _get_areas_with_devices(device_registry, area_registry)
+        available_areas = _get_areas_with_devices(
+            device_registry, area_registry, self.config_entry.entry_id
+        )
         if not available_areas:
             return self.async_abort(reason="no_ha_devices")
 
@@ -535,14 +537,24 @@ class HomeBoxOptionsFlow(OptionsFlowWithConfigEntry):
         if area_entry is None:
             return self.async_abort(reason="missing_hb_item")
 
-        area_devices = _get_named_ha_devices_in_area(self.hass, selected_area_id)
-        if not area_devices:
-            return self.async_abort(reason="no_ha_devices")
+        device_registry = dr.async_get(self.hass)
+        # Named, non-HomeBox devices in this area, excluding anything already
+        # owned by this HomeBox entry (linked devices and any stray "HomeBox"
+        # devices HomeBox previously materialized).
+        selectable_devices = _get_named_ha_devices_in_area(
+            self.hass, selected_area_id, self.config_entry.entry_id
+        )
 
         ha_device_to_hb_item, _ = get_link_maps(self.config_entry)
         linked_ids = set(ha_device_to_hb_item)
-        selectable_devices = [device for device in area_devices if device.id not in linked_ids]
-        linked_devices = [device for device in area_devices if device.id in linked_ids]
+        # Already-linked devices are derived from the link map (they are filtered
+        # out of the selectable pool above) so they can still be shown for info.
+        linked_devices = [
+            device
+            for ha_device_id in linked_ids
+            if (device := device_registry.async_get(ha_device_id)) is not None
+            and device.area_id == selected_area_id
+        ]
         if not selectable_devices:
             return self.async_abort(reason="no_unlinked_ha_devices")
 
@@ -1148,6 +1160,30 @@ def _format_ha_model_number(ha_device: dr.DeviceEntry) -> str:
     return model or model_id
 
 
+def _is_homebox_owned_device(
+    device: dr.DeviceEntry, homebox_entry_id: str
+) -> bool:
+    """Return True if a device belongs to this HomeBox integration.
+
+    Excludes both the HomeBox hub device (carrying a HomeBox identifier) and any
+    device this HomeBox config entry is attached to. The latter covers linked
+    devices as well as stray/nameless devices HomeBox may have materialized,
+    which would otherwise show up as "HomeBox" in the import wizard.
+    """
+    if any(identifier[0] == DOMAIN for identifier in device.identifiers):
+        return True
+    return homebox_entry_id in device.config_entries
+
+
+def _is_named_linkable_device(
+    device: dr.DeviceEntry, homebox_entry_id: str
+) -> bool:
+    """Return True if a device is a named device eligible for HomeBox linking."""
+    return bool(device.name_by_user or device.name) and not _is_homebox_owned_device(
+        device, homebox_entry_id
+    )
+
+
 def _get_unlinked_named_ha_devices(
     hass: HomeAssistant, config_entry: ConfigEntry
 ) -> list[dr.DeviceEntry]:
@@ -1158,22 +1194,22 @@ def _get_unlinked_named_ha_devices(
     return [
         device
         for device in device_registry.devices.values()
-        if (device.name_by_user or device.name)
-        and device.id not in linked_ha_device_ids
-        and not any(identifier[0] == DOMAIN for identifier in device.identifiers)
+        if device.id not in linked_ha_device_ids
+        and _is_named_linkable_device(device, config_entry.entry_id)
     ]
 
 
 def _get_areas_with_devices(
-    device_registry: dr.DeviceRegistry, area_registry: ar.AreaRegistry
+    device_registry: dr.DeviceRegistry,
+    area_registry: ar.AreaRegistry,
+    homebox_entry_id: str,
 ) -> list[ar.AreaEntry]:
     """Return areas that contain at least one named non-HomeBox device."""
     used_area_ids = {
         device.area_id
         for device in device_registry.devices.values()
         if device.area_id
-        and (device.name_by_user or device.name)
-        and not any(identifier[0] == DOMAIN for identifier in device.identifiers)
+        and _is_named_linkable_device(device, homebox_entry_id)
     }
     return [
         area
@@ -1183,7 +1219,7 @@ def _get_areas_with_devices(
 
 
 def _get_named_ha_devices_in_area(
-    hass: HomeAssistant, area_id: str
+    hass: HomeAssistant, area_id: str, homebox_entry_id: str
 ) -> list[dr.DeviceEntry]:
     """Return named, non-HomeBox devices assigned to the given area."""
     device_registry = dr.async_get(hass)
@@ -1191,6 +1227,5 @@ def _get_named_ha_devices_in_area(
         device
         for device in device_registry.devices.values()
         if device.area_id == area_id
-        and (device.name_by_user or device.name)
-        and not any(identifier[0] == DOMAIN for identifier in device.identifiers)
+        and _is_named_linkable_device(device, homebox_entry_id)
     ]

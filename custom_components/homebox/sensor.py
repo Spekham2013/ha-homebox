@@ -200,6 +200,29 @@ class HomeBoxStatisticsSensor(
         self.async_write_ha_state()
 
 
+def _build_linked_device_info(linked_ha_device: dr.DeviceEntry) -> DeviceInfo:
+    """Build DeviceInfo that attaches an entity to an existing HA device.
+
+    Identifiers/connections are copied so Home Assistant merges the entity into
+    the device that its owning integration created. The name/manufacturer/model
+    are included as a fallback so that if this entity is registered before the
+    owning integration has (re)created the device, the resulting device is not
+    left nameless (which otherwise displays as the integration name, "HomeBox").
+    """
+    device_info: DeviceInfo = DeviceInfo()
+    if linked_ha_device.identifiers:
+        device_info["identifiers"] = set(linked_ha_device.identifiers)
+    if linked_ha_device.connections:
+        device_info["connections"] = set(linked_ha_device.connections)
+    if name := (linked_ha_device.name or linked_ha_device.name_by_user):
+        device_info["name"] = name
+    if linked_ha_device.manufacturer:
+        device_info["manufacturer"] = linked_ha_device.manufacturer
+    if linked_ha_device.model:
+        device_info["model"] = linked_ha_device.model
+    return device_info
+
+
 class HomeBoxLinkedItemIdSensor(
     CoordinatorEntity[HomeBoxDataUpdateCoordinator], SensorEntity
 ):
@@ -224,13 +247,7 @@ class HomeBoxLinkedItemIdSensor(
         self._hb_item_id = hb_item_id
         self._attr_unique_id = f"{config_entry_id}_{ha_device_id}_hb_item_id"
         self._attr_native_value = hb_item_id
-
-        device_info: DeviceInfo = DeviceInfo()
-        if linked_ha_device.identifiers:
-            device_info["identifiers"] = set(linked_ha_device.identifiers)
-        if linked_ha_device.connections:
-            device_info["connections"] = set(linked_ha_device.connections)
-        self._attr_device_info = device_info
+        self._attr_device_info = _build_linked_device_info(linked_ha_device)
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
@@ -264,13 +281,7 @@ class HomeBoxLinkedBatteryDepletionDateSensor(
         self._ha_device_id = ha_device_id
         self._attr_unique_id = f"{config_entry_id}_{ha_device_id}_battery_depletion_date"
         self._attr_native_value = self._resolve_native_value()
-
-        device_info: DeviceInfo = DeviceInfo()
-        if linked_ha_device.identifiers:
-            device_info["identifiers"] = set(linked_ha_device.identifiers)
-        if linked_ha_device.connections:
-            device_info["connections"] = set(linked_ha_device.connections)
-        self._attr_device_info = device_info
+        self._attr_device_info = _build_linked_device_info(linked_ha_device)
 
     def _resolve_native_value(self) -> date | None:
         """Return depletion date for linked device if available."""
